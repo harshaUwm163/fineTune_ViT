@@ -68,8 +68,12 @@ def setup(args):
     elif args.dataset == 'imagenet1k':
         num_classes = 1000
 
+    ######################################################################################################
+    ############################################### TODO #################################################
+    # you need to change these two lines which define the model and load the checkpoint
     model = VisionTransformer(config, args.img_size, zero_head=True, num_classes=num_classes)
     model.load_from(np.load(args.pretrained_dir))
+    ######################################################################################################
     model.to(args.device)
     num_params = count_parameters(model)
 
