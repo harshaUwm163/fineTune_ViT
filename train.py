@@ -22,6 +22,8 @@ from utils.scheduler import WarmupLinearSchedule, WarmupCosineSchedule
 from utils.data_utils import get_loader
 from utils.dist_util import get_world_size
 
+import timm
+import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +61,12 @@ def setup(args):
     # Prepare model
     config = CONFIGS[args.model_type]
 
-    num_classes = 10 if args.dataset == "cifar10" else 100
+    if args.dataset == 'cifar10':
+        num_classes = 10
+    elif args.dataset == 'cifar100':
+        num_classes = 100
+    elif args.dataset == 'imagenet1k':
+        num_classes = 1000
 
     model = VisionTransformer(config, args.img_size, zero_head=True, num_classes=num_classes)
     model.load_from(np.load(args.pretrained_dir))
@@ -142,12 +149,13 @@ def train(args, model):
     """ Train the model """
     if args.local_rank in [-1, 0]:
         os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(os.path.join(args.output_dir, args.name), exist_ok=True)
         writer = SummaryWriter(log_dir=os.path.join("logs", args.name))
 
     args.train_batch_size = args.train_batch_size // args.gradient_accumulation_steps
 
     # Prepare dataset
-    train_loader, test_loader = get_loader(args)
+    train_loader, test_loader = get_loader(args, model=model)
 
     # Prepare optimizer and scheduler
     optimizer = torch.optim.SGD(model.parameters(),
@@ -182,6 +190,8 @@ def train(args, model):
     model.zero_grad()
     set_seed(args)  # Added here for reproducibility (even between python 2 and 3)
     losses = AverageMeter()
+    train_losses = []
+    eval_accs = []
     global_step, best_acc = 0, 0
     while True:
         model.train()
@@ -226,6 +236,16 @@ def train(args, model):
                         save_model(args, model)
                         best_acc = accuracy
                     model.train()
+                    eval_accs.append(accuracy)
+
+                    # plt.plot(range(0,global_step, args.eval_every), eval_accs)
+                    # plt.savefig(os.path.join(args.output_dir, args.name, 'eval_accs.png'))
+                    # plt.close()
+
+                train_losses.append(losses.avg)
+                # plt.plot(range(global_step), train_losses)
+                # plt.savefig(os.path.join(args.output_dir, args.name, 'train_losses.png'))
+                # plt.close()
 
                 if global_step % t_total == 0:
                     break
@@ -244,7 +264,7 @@ def main():
     # Required parameters
     parser.add_argument("--name", required=True,
                         help="Name of this run. Used for monitoring.")
-    parser.add_argument("--dataset", choices=["cifar10", "cifar100"], default="cifar10",
+    parser.add_argument("--dataset", choices=["cifar10", "cifar100", "imagenet1k"], default="imagenet1k",
                         help="Which downstream task.")
     parser.add_argument("--model_type", choices=["ViT-B_16", "ViT-B_32", "ViT-L_16",
                                                  "ViT-L_32", "ViT-H_14", "R50-ViT-B_16"],
@@ -253,6 +273,8 @@ def main():
     parser.add_argument("--pretrained_dir", type=str, default="checkpoint/ViT-B_16.npz",
                         help="Where to search for pretrained ViT models.")
     parser.add_argument("--output_dir", default="output", type=str,
+                        help="The output directory where checkpoints will be written.")
+    parser.add_argument("--save", action='store_true', 
                         help="The output directory where checkpoints will be written.")
 
     parser.add_argument("--img_size", default=224, type=int,
@@ -293,6 +315,9 @@ def main():
                         help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
                              "0 (default value): dynamic loss scaling.\n"
                              "Positive power of 2: static loss scaling value.\n")
+
+    parser.add_argument("--dataset_path", type=str, default="/data/harsha/quantization/imagenet2012/",
+                        help="Where to search for the dataset; only used for imagenet1k")
     args = parser.parse_args()
 
     # Setup CUDA, GPU & distributed training

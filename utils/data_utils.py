@@ -5,13 +5,21 @@ import torch
 from torchvision import transforms, datasets
 from torch.utils.data import DataLoader, RandomSampler, DistributedSampler, SequentialSampler
 
+import utils.imageNet_utils as datasets
 
 logger = logging.getLogger(__name__)
 
 
-def get_loader(args):
+def get_loader(args, model=None):
     if args.local_rank not in [-1, 0]:
         torch.distributed.barrier()
+
+    if args.dataset == 'imagenet1k':
+        g=datasets.ViTImageNetLoaderGenerator(args.dataset_path,'imagenet',args.train_batch_size,args.eval_batch_size,16, kwargs={"model":model})
+        train_loader = g.train_loader()
+        test_loader = g.test_loader()
+
+        return train_loader, test_loader
 
     transform_train = transforms.Compose([
         transforms.RandomResizedCrop((args.img_size, args.img_size), scale=(0.05, 1.0)),
@@ -34,7 +42,7 @@ def get_loader(args):
                                    download=True,
                                    transform=transform_test) if args.local_rank in [-1, 0] else None
 
-    else:
+    elif args.dataset == "cifar10":
         trainset = datasets.CIFAR100(root="./data",
                                      train=True,
                                      download=True,
